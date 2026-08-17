@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation";
 import { RoomHeader } from "./_components/room-header";
 import { RoomSidebar } from "./_components/room-sidebar";
 import { RoomStage } from "./_components/room-stage";
+import { useP2PRoom } from "@/hooks/use-p2p-room";
 import { getStoredDisplayName, getStoredUserColor } from "@/lib/storage";
 import { getRoomJoinUrl } from "@/lib/room-id";
 
@@ -20,15 +21,39 @@ export default function RoomPage({ params }: RoomPageProps) {
   const searchParams = useSearchParams();
 
   const roomNameParam = searchParams.get("name") || "Private P2P Space";
-  const [displayName, setDisplayName] = useState("User");
   const [userColor, setUserColor] = useState("from-indigo-500 to-purple-600");
-  const [copied, setCopied] = useState(false);
+  const [showSignalingModal, setShowSignalingModal] = useState(false);
+
+  const initialName = getStoredDisplayName() || "User";
+
+  const {
+    localPeerId,
+    displayName,
+    setDisplayName,
+    connectedPeers,
+    pendingRequests,
+    activeSignal,
+    signalType,
+    connectionStatus,
+    messages,
+    typingPeers,
+    activeTransfers,
+    createOfferSignal,
+    processRemoteSignal,
+    acceptJoinRequest,
+    rejectJoinRequest,
+    sendTextMessage,
+    sendFile,
+    sendTypingSignal,
+    clearHistory,
+    leaveRoom,
+  } = useP2PRoom({
+    roomId,
+    initialDisplayName: initialName,
+    isHost: true,
+  });
 
   useEffect(() => {
-    const savedName = getStoredDisplayName();
-    if (savedName) {
-      setDisplayName(savedName);
-    }
     setUserColor(getStoredUserColor());
   }, []);
 
@@ -36,30 +61,51 @@ export default function RoomPage({ params }: RoomPageProps) {
     const url = getRoomJoinUrl(roomId);
     try {
       await navigator.clipboard.writeText(url);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch {
-      // Fallback
-    }
+    } catch {}
   };
 
   return (
     <div className="flex h-screen flex-col bg-slate-950 text-slate-100 overflow-hidden">
       {/* Room Header */}
-      <RoomHeader roomId={roomId} roomName={roomNameParam} memberCount={1} />
+      <RoomHeader
+        roomId={roomId}
+        roomName={roomNameParam}
+        memberCount={connectedPeers.length + 1}
+      />
 
-      {/* Main Body */}
+      {/* Main Layout */}
       <div className="flex flex-1 flex-col lg:flex-row overflow-hidden">
         {/* Participant Sidebar */}
         <RoomSidebar
           displayName={displayName}
           userColor={userColor}
           roomId={roomId}
+          connectedPeers={connectedPeers}
           onCopyLink={handleCopyLink}
+          onOpenSignaling={() => setShowSignalingModal(true)}
         />
 
-        {/* Main Stage Workspace */}
-        <RoomStage roomId={roomId} displayName={displayName} />
+        {/* Central Workspace Stage */}
+        <RoomStage
+          roomId={roomId}
+          displayName={displayName}
+          connectedPeers={connectedPeers}
+          pendingRequests={pendingRequests}
+          activeSignal={activeSignal}
+          signalType={signalType}
+          connectionStatus={connectionStatus}
+          messages={messages}
+          typingPeers={typingPeers}
+          activeTransfers={activeTransfers}
+          onCreateOfferSignal={createOfferSignal}
+          onProcessSignalPayload={processRemoteSignal}
+          onAcceptJoinRequest={acceptJoinRequest}
+          onRejectJoinRequest={rejectJoinRequest}
+          onSendTextMessage={sendTextMessage}
+          onSendFile={sendFile}
+          onSendTyping={sendTypingSignal}
+          onClearHistory={clearHistory}
+        />
       </div>
     </div>
   );

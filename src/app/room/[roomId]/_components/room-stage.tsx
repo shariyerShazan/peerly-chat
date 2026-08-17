@@ -2,138 +2,160 @@
 
 import React, { useState } from "react";
 import { JoinRequestModalPreview } from "./join-request-modal-preview";
-import { MessageSquare, Video, Radio, Lock, FileText, CheckCircle2, Shield, ArrowRight } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { SignalingExchangeModal } from "./signaling-exchange-modal";
+import { RoomChat } from "./room-chat";
+import {
+  MessageSquare,
+  Video,
+  Radio,
+  Lock,
+  CheckCircle2,
+  Shield,
+  Activity,
+} from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { PendingJoinRequest, ChatMessageItem } from "@/hooks/use-p2p-room";
+import { PeerMember } from "@/lib/webrtc/room-state";
+import { FileTransferProgress } from "@/lib/file-transfer/file-chunker";
 
 interface RoomStageProps {
   roomId: string;
   displayName: string;
+  connectedPeers: PeerMember[];
+  pendingRequests: PendingJoinRequest[];
+  activeSignal: string | null;
+  signalType: "offer" | "answer" | null;
+  connectionStatus: string;
+  messages: ChatMessageItem[];
+  typingPeers: { [peerId: string]: string };
+  activeTransfers: { [transferId: string]: FileTransferProgress };
+  onCreateOfferSignal: () => void;
+  onProcessSignalPayload: (payload: string) => Promise<any>;
+  onAcceptJoinRequest: (req: PendingJoinRequest) => void;
+  onRejectJoinRequest: (peerId: string) => void;
+  onSendTextMessage: (text: string) => void;
+  onSendFile: (file: File) => void;
+  onSendTyping: () => void;
+  onClearHistory: () => void;
 }
 
-export function RoomStage({ roomId, displayName }: RoomStageProps) {
-  const [activeTab, setActiveTab] = useState<"overview" | "chat" | "media">("overview");
+export function RoomStage({
+  roomId,
+  displayName,
+  connectedPeers,
+  pendingRequests,
+  activeSignal,
+  signalType,
+  connectionStatus,
+  messages,
+  typingPeers,
+  activeTransfers,
+  onCreateOfferSignal,
+  onProcessSignalPayload,
+  onAcceptJoinRequest,
+  onRejectJoinRequest,
+  onSendTextMessage,
+  onSendFile,
+  onSendTyping,
+  onClearHistory,
+}: RoomStageProps) {
+  const [activeTab, setActiveTab] = useState<"chat" | "signaling" | "media">("chat");
+  const isConnected = connectionStatus === "connected" || connectedPeers.length > 0;
 
   return (
     <div className="flex-1 p-4 sm:p-6 space-y-6 overflow-y-auto">
-      {/* Admission Control / Join Request Banner Simulation */}
-      <JoinRequestModalPreview />
+      {/* Admission Control Pending Join Requests */}
+      <JoinRequestModalPreview
+        pendingRequests={pendingRequests}
+        onAccept={onAcceptJoinRequest}
+        onReject={onRejectJoinRequest}
+      />
 
-      {/* Main Stage Card */}
+      {/* Main Workspace Stage Header */}
       <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-6 backdrop-blur-xl space-y-6">
-        {/* Stage Header */}
         <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 border-b border-slate-800/80 pb-4">
           <div>
             <div className="flex items-center space-x-2">
-              <h2 className="text-xl font-bold text-white tracking-tight">P2P Workspace Stage</h2>
-              <Badge variant="default" className="bg-indigo-500/20 text-indigo-300 border-indigo-500/30">
-                STEP-1 Ready
+              <h2 className="text-xl font-bold text-white tracking-tight">P2P Encrypted Workspace</h2>
+              <Badge variant="success" className="capitalize">
+                STEP-3 E2E Ready
               </Badge>
             </div>
             <p className="text-sm text-slate-400 mt-1">
-              Backendless WebRTC structure active for room <code className="text-indigo-400 font-mono">{roomId}</code>.
+              WebCrypto AES-GCM-256 E2E Text & Chunked P2P File Transfer for room{" "}
+              <code className="text-indigo-400 font-mono">{roomId}</code>.
             </p>
           </div>
 
           <div className="flex items-center space-x-2 bg-slate-950/80 p-1.5 rounded-xl border border-slate-800">
             <button
-              onClick={() => setActiveTab("overview")}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
-                activeTab === "overview" ? "bg-indigo-600 text-white" : "text-slate-400 hover:text-white"
+              onClick={() => setActiveTab("chat")}
+              className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-colors flex items-center space-x-1.5 ${
+                activeTab === "chat"
+                  ? "bg-indigo-600 text-white shadow-md shadow-indigo-600/30"
+                  : "text-slate-400 hover:text-white"
               }`}
             >
-              Architecture & Signaling
+              <MessageSquare className="h-3.5 w-3.5" />
+              <span>Encrypted Chat & Files</span>
             </button>
             <button
-              onClick={() => setActiveTab("chat")}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
-                activeTab === "chat" ? "bg-indigo-600 text-white" : "text-slate-400 hover:text-white"
+              onClick={() => setActiveTab("signaling")}
+              className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-colors flex items-center space-x-1.5 ${
+                activeTab === "signaling"
+                  ? "bg-indigo-600 text-white shadow-md shadow-indigo-600/30"
+                  : "text-slate-400 hover:text-white"
               }`}
             >
-              Chat & Files
+              <Radio className="h-3.5 w-3.5" />
+              <span>P2P Handshake</span>
             </button>
             <button
               onClick={() => setActiveTab("media")}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
-                activeTab === "media" ? "bg-indigo-600 text-white" : "text-slate-400 hover:text-white"
+              className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-colors flex items-center space-x-1.5 ${
+                activeTab === "media"
+                  ? "bg-indigo-600 text-white shadow-md shadow-indigo-600/30"
+                  : "text-slate-400 hover:text-white"
               }`}
             >
-              Audio / Video
+              <Video className="h-3.5 w-3.5 text-purple-400" />
+              <span>Audio / Video (STEP-4)</span>
             </button>
           </div>
         </div>
 
-        {/* Tab Contents */}
-        {activeTab === "overview" && (
-          <div className="space-y-6">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4 space-y-2">
-                <div className="flex items-center space-x-2 text-emerald-400 font-semibold text-sm">
-                  <CheckCircle2 className="h-4 w-4" />
-                  <span>STEP-1 Completed</span>
-                </div>
-                <p className="text-xs text-slate-300 leading-relaxed">
-                  Next.js App Router shell, dark responsive UI, display name persistence, browser capability detector.
-                </p>
-              </div>
-
-              <div className="rounded-xl border border-indigo-500/30 bg-indigo-500/10 p-4 space-y-2">
-                <div className="flex items-center space-x-2 text-indigo-400 font-semibold text-sm">
-                  <Radio className="h-4 w-4" />
-                  <span>STEP-2 Up Next</span>
-                </div>
-                <p className="text-xs text-slate-300 leading-relaxed">
-                  Backendless signaling, WebRTC DataChannel connection lifecycle, and P2P peer state distribution.
-                </p>
-              </div>
-
-              <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-4 space-y-2 opacity-80">
-                <div className="flex items-center space-x-2 text-purple-400 font-semibold text-sm">
-                  <Lock className="h-4 w-4" />
-                  <span>STEPS 3-5 Roadmap</span>
-                </div>
-                <p className="text-xs text-slate-400 leading-relaxed">
-                  WebCrypto AES-GCM encryption, chunked file transfer, audio/video MediaStream grid, and production security polish.
-                </p>
-              </div>
-            </div>
-
-            {/* Architecture diagram view */}
-            <div className="rounded-xl border border-slate-800 bg-slate-950/90 p-5 space-y-3 font-mono text-xs text-slate-300">
-              <div className="flex items-center justify-between text-indigo-400 border-b border-slate-800 pb-2">
-                <span className="font-bold flex items-center space-x-2">
-                  <Shield className="h-4 w-4" />
-                  <span>Zero-Backend P2P Data Flow</span>
-                </span>
-                <Badge variant="outline" className="text-[10px] text-emerald-400 border-emerald-500/30">
-                  Client-Only Architecture
-                </Badge>
-              </div>
-              <div className="py-2 text-slate-400 leading-loose">
-                <div>[Browser A ({displayName || "You"})]</div>
-                <div className="pl-4 text-indigo-400">↕ WebRTC RTCPeerConnection (RTCDataChannel + MediaStream)</div>
-                <div>[Browser B (Peer)]</div>
-              </div>
-            </div>
-          </div>
-        )}
-
+        {/* Tab 1: Encrypted Chat & Chunked P2P File Transfer */}
         {activeTab === "chat" && (
-          <div className="rounded-xl border border-dashed border-slate-800 bg-slate-950/50 p-8 text-center space-y-3">
-            <MessageSquare className="h-8 w-8 text-indigo-400 mx-auto" />
-            <h3 className="text-base font-bold text-white">E2E Encrypted Chat & File Sharing</h3>
-            <p className="text-xs text-slate-400 max-w-md mx-auto">
-              Text & file transfer UI will be activated in STEP-3 after establishing the P2P DataChannel connection.
-            </p>
-          </div>
+          <RoomChat
+            messages={messages}
+            typingPeers={typingPeers}
+            activeTransfers={activeTransfers}
+            isConnected={isConnected}
+            onSendText={onSendTextMessage}
+            onSendFile={onSendFile}
+            onTyping={onSendTyping}
+            onClearHistory={onClearHistory}
+          />
         )}
 
+        {/* Tab 2: P2P Signal Exchange Handshake */}
+        {activeTab === "signaling" && (
+          <SignalingExchangeModal
+            activeSignal={activeSignal}
+            signalType={signalType}
+            connectionStatus={connectionStatus}
+            onCreateOffer={onCreateOfferSignal}
+            onProcessSignal={onProcessSignalPayload}
+          />
+        )}
+
+        {/* Tab 3: Audio/Video Calling Roadmap */}
         {activeTab === "media" && (
           <div className="rounded-xl border border-dashed border-slate-800 bg-slate-950/50 p-8 text-center space-y-3">
             <Video className="h-8 w-8 text-purple-400 mx-auto" />
-            <h3 className="text-base font-bold text-white">P2P Audio & Video Calling</h3>
+            <h3 className="text-base font-bold text-white">P2P Audio & Video Calls</h3>
             <p className="text-xs text-slate-400 max-w-md mx-auto">
-              Microphone, camera controls, and responsive grid layout will be hooked up to MediaStream in STEP-4.
+              MediaStream microphone/camera controls, grid layout, and mute toggles will be activated in STEP-4.
             </p>
           </div>
         )}
