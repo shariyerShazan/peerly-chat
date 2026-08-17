@@ -12,8 +12,9 @@ import {
 
 export function useMediaStream() {
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
-  const [isMicMuted, setIsMicMuted] = useState(false);
-  const [isVideoMuted, setIsVideoMuted] = useState(false);
+  // Default audio and video to OFF (muted) until explicitly turned on by user
+  const [isMicMuted, setIsMicMuted] = useState(true);
+  const [isVideoMuted, setIsVideoMuted] = useState(true);
   const [isScreenSharing, setIsScreenSharing] = useState(false);
   const [devices, setDevices] = useState<{
     audioInputs: MediaDeviceItem[];
@@ -34,10 +35,15 @@ export function useMediaStream() {
   }, [refreshDevices]);
 
   /**
-   * Initializes local user camera & microphone stream
+   * Initializes local user camera & microphone stream with default OFF tracks
    */
   const startLocalStream = useCallback(
-    async (options?: { audioId?: string; videoId?: string }) => {
+    async (options?: {
+      audioId?: string;
+      videoId?: string;
+      startAudioOn?: boolean;
+      startVideoOn?: boolean;
+    }) => {
       try {
         const stream = await captureUserMedia({
           audio: options?.audioId ? { deviceId: { exact: options.audioId } } : true,
@@ -45,9 +51,16 @@ export function useMediaStream() {
         });
 
         cameraStreamRef.current = stream;
+
+        const audioOn = options?.startAudioOn ?? false;
+        const videoOn = options?.startVideoOn ?? false;
+
+        setTrackEnabled(stream, "audio", audioOn);
+        setTrackEnabled(stream, "video", videoOn);
+
         setLocalStream(stream);
-        setIsMicMuted(false);
-        setIsVideoMuted(false);
+        setIsMicMuted(!audioOn);
+        setIsVideoMuted(!videoOn);
         await refreshDevices();
         return stream;
       } catch (err) {
@@ -67,27 +80,43 @@ export function useMediaStream() {
     setLocalStream(null);
     cameraStreamRef.current = null;
     setIsScreenSharing(false);
+    setIsMicMuted(true);
+    setIsVideoMuted(true);
   }, [localStream]);
 
   /**
-   * Toggle Audio Mute / Unmute
+   * Toggle Audio Mute / Unmute (Turns audio ON if off)
    */
-  const toggleMic = useCallback(() => {
-    if (!localStream) return;
-    const nextState = !isMicMuted;
-    setTrackEnabled(localStream, "audio", !nextState);
-    setIsMicMuted(nextState);
-  }, [localStream, isMicMuted]);
+  const toggleMic = useCallback(async () => {
+    let stream = localStream;
+    if (!stream) {
+      stream = await startLocalStream({ startAudioOn: true, startVideoOn: !isVideoMuted });
+      return;
+    }
+    const nextMuteState = !isMicMuted;
+    setTrackEnabled(stream, "audio", !nextMuteState);
+    setIsMicMuted(nextMuteState);
+    const updatedStream = new MediaStream(stream.getTracks());
+    cameraStreamRef.current = updatedStream;
+    setLocalStream(updatedStream);
+  }, [localStream, isMicMuted, isVideoMuted, startLocalStream]);
 
   /**
-   * Toggle Video On / Off
+   * Toggle Video On / Off (Turns camera ON if off)
    */
-  const toggleCamera = useCallback(() => {
-    if (!localStream) return;
-    const nextState = !isVideoMuted;
-    setTrackEnabled(localStream, "video", !nextState);
-    setIsVideoMuted(nextState);
-  }, [localStream, isVideoMuted]);
+  const toggleCamera = useCallback(async () => {
+    let stream = localStream;
+    if (!stream) {
+      stream = await startLocalStream({ startAudioOn: !isMicMuted, startVideoOn: true });
+      return;
+    }
+    const nextMuteState = !isVideoMuted;
+    setTrackEnabled(stream, "video", !nextMuteState);
+    setIsVideoMuted(nextMuteState);
+    const updatedStream = new MediaStream(stream.getTracks());
+    cameraStreamRef.current = updatedStream;
+    setLocalStream(updatedStream);
+  }, [localStream, isVideoMuted, isMicMuted, startLocalStream]);
 
   /**
    * Toggle Screen Share
@@ -98,7 +127,7 @@ export function useMediaStream() {
       if (cameraStreamRef.current) {
         setLocalStream(cameraStreamRef.current);
       } else {
-        await startLocalStream();
+        await startLocalStream({ startAudioOn: !isMicMuted, startVideoOn: !isVideoMuted });
       }
       setIsScreenSharing(false);
       return;
@@ -128,7 +157,7 @@ export function useMediaStream() {
     } catch (err) {
       console.warn("Screen sharing cancelled or failed:", err);
     }
-  }, [isScreenSharing, localStream, startLocalStream]);
+  }, [isScreenSharing, localStream, isMicMuted, isVideoMuted, startLocalStream]);
 
   useEffect(() => {
     return () => {

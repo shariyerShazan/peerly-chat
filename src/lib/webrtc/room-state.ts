@@ -11,6 +11,8 @@ export interface PeerMember {
   dataChannelState: RTCDataChannelState;
   joinedAt: number;
   lastSeenAt?: number;
+  isMicMuted?: boolean;
+  isVideoMuted?: boolean;
 }
 
 export type ControlMessageType =
