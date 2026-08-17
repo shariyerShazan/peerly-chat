@@ -14,8 +14,10 @@ export function JoinRoomCard() {
   const [displayName, setDisplayName] = useState("");
   const [roomInput, setRoomInput] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
+    setMounted(true);
     setDisplayName(getStoredDisplayName());
   }, []);
 
@@ -45,7 +47,7 @@ export function JoinRoomCard() {
     }
 
     setStoredDisplayName(displayName);
-    router.push(`/room/${cleanRoomId}`);
+    router.push(`/room/${cleanRoomId}?role=guest`);
   };
 
   return (
@@ -76,6 +78,7 @@ export function JoinRoomCard() {
               onChange={(e) => setDisplayName(e.target.value)}
               required
               maxLength={32}
+              autoComplete="off"
             />
           </div>
 
@@ -93,6 +96,7 @@ export function JoinRoomCard() {
                 if (error) setError(null);
               }}
               required
+              autoComplete="off"
             />
           </div>
 
@@ -108,10 +112,10 @@ export function JoinRoomCard() {
           <Button
             type="submit"
             variant="secondary"
-            disabled={!displayName.trim() || !roomInput.trim()}
+            disabled={mounted && (!displayName.trim() || !roomInput.trim())}
             className="w-full h-12 text-base font-semibold border-purple-500/30 hover:bg-purple-500/20 group"
           >
-            <span>Request to Join</span>
+            <span>Join Room</span>
             <ArrowRight className="ml-2 h-4 w-4 transition-transform group-hover:translate-x-1" />
           </Button>
         </CardFooter>

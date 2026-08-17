@@ -6,10 +6,10 @@
 export interface PeerConnectionCallbacks {
   onIceCandidate?: (candidate: RTCIceCandidate) => void;
   onIceGatheringComplete?: (candidates: RTCIceCandidateInit[]) => void;
-  onConnectionStateChange?: (state: RTCPeerConnectionState) => void;
-  onDataChannelStateChange?: (state: RTCDataChannelState) => void;
-  onMessage?: (data: string) => void;
-  onTrack?: (track: MediaStreamTrack, streams: readonly MediaStream[]) => void;
+  onConnectionStateChange?: (state: RTCPeerConnectionState, peerId: string) => void;
+  onDataChannelStateChange?: (state: RTCDataChannelState, peerId: string) => void;
+  onMessage?: (data: string, peerId: string) => void;
+  onTrack?: (track: MediaStreamTrack, streams: readonly MediaStream[], peerId: string) => void;
   onError?: (err: Error) => void;
 }
 
@@ -43,7 +43,19 @@ export class ManagedPeerConnection {
     };
 
     this.pc = new RTCPeerConnection(configuration);
+
+    // Pre-allocate audio & video transceivers so SDP negotiation includes media m-lines
+    try {
+      this.pc.addTransceiver("audio", { direction: "sendrecv" });
+      this.pc.addTransceiver("video", { direction: "sendrecv" });
+    } catch (err) {}
+
     this.setupListeners();
+  }
+
+  public updateRemotePeerInfo(peerId: string, displayName: string): void {
+    this.peerId = peerId;
+    this.displayName = displayName;
   }
 
   private setupListeners(): void {
@@ -63,7 +75,7 @@ export class ManagedPeerConnection {
 
     this.pc.onconnectionstatechange = () => {
       if (this.isClosed) return;
-      this.callbacks.onConnectionStateChange?.(this.pc.connectionState);
+      this.callbacks.onConnectionStateChange?.(this.pc.connectionState, this.peerId);
     };
 
     this.pc.ondatachannel = (event) => {
@@ -71,17 +83,45 @@ export class ManagedPeerConnection {
     };
 
     this.pc.ontrack = (event) => {
-      this.callbacks.onTrack?.(event.track, event.streams);
+      this.callbacks.onTrack?.(event.track, event.streams, this.peerId);
     };
   }
 
   /**
-   * Attaches local audio/video MediaStream tracks to peer connection
+   * Waits for ICE candidate gathering to complete (or up to timeoutMs)
+   */
+  public async waitForIceGathering(timeoutMs = 1200): Promise<void> {
+    if (this.pc.iceGatheringState === "complete") return;
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => resolve(), timeoutMs);
+      const checkState = () => {
+        if (this.pc.iceGatheringState === "complete") {
+          clearTimeout(timer);
+          this.pc.removeEventListener("icegatheringstatechange", checkState);
+          resolve();
+        }
+      };
+      this.pc.addEventListener("icegatheringstatechange", checkState);
+    });
+  }
+
+  /**
+   * Attaches or replaces local audio/video MediaStream tracks on peer connection
    */
   public addLocalStream(stream: MediaStream): void {
     stream.getTracks().forEach((track) => {
       try {
-        this.pc.addTrack(track, stream);
+        const senders = this.pc.getSenders();
+        const existingSender =
+          senders.find((s) => s.track?.kind === track.kind) ||
+          senders.find((s) => !s.track) ||
+          (track.kind === "audio" ? senders[0] : senders[1]);
+
+        if (existingSender) {
+          existingSender.replaceTrack(track).catch(() => {});
+        } else {
+          this.pc.addTrack(track, stream);
+        }
       } catch (err) {
         console.warn(`Failed to add track ${track.kind} to peer ${this.peerId}:`, err);
       }
@@ -101,12 +141,13 @@ export class ManagedPeerConnection {
 
   private bindDataChannel(channel: RTCDataChannel): void {
     this.dataChannel = channel;
+
     this.dataChannel.onopen = () => {
-      this.callbacks.onDataChannelStateChange?.("open");
+      this.callbacks.onDataChannelStateChange?.("open", this.peerId);
     };
 
     this.dataChannel.onclose = () => {
-      this.callbacks.onDataChannelStateChange?.("closed");
+      this.callbacks.onDataChannelStateChange?.("closed", this.peerId);
     };
 
     this.dataChannel.onerror = (evt) => {
@@ -115,14 +156,20 @@ export class ManagedPeerConnection {
     };
 
     this.dataChannel.onmessage = (event) => {
-      this.callbacks.onMessage?.(event.data);
+      this.callbacks.onMessage?.(event.data, this.peerId);
     };
+
+    // Immediate state trigger if already open
+    if (this.dataChannel.readyState === "open") {
+      this.callbacks.onDataChannelStateChange?.("open", this.peerId);
+    }
   }
 
   public async createOffer(): Promise<RTCSessionDescriptionInit> {
     const offer = await this.pc.createOffer();
     await this.pc.setLocalDescription(offer);
-    return offer;
+    await this.waitForIceGathering(1000);
+    return this.pc.localDescription || offer;
   }
 
   public async createAnswer(offerSdp: string): Promise<RTCSessionDescriptionInit> {
@@ -131,7 +178,8 @@ export class ManagedPeerConnection {
     );
     const answer = await this.pc.createAnswer();
     await this.pc.setLocalDescription(answer);
-    return answer;
+    await this.waitForIceGathering(1000);
+    return this.pc.localDescription || answer;
   }
 
   public async setAnswer(answerSdp: string): Promise<void> {
@@ -153,8 +201,13 @@ export class ManagedPeerConnection {
 
   public send(data: string): boolean {
     if (this.dataChannel && this.dataChannel.readyState === "open") {
-      this.dataChannel.send(data);
-      return true;
+      try {
+        this.dataChannel.send(data);
+        return true;
+      } catch (err) {
+        console.warn(`Failed to send data on DataChannel for peer ${this.peerId}:`, err);
+        return false;
+      }
     }
     return false;
   }

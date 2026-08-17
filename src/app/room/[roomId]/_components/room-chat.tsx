@@ -4,9 +4,8 @@ import React, { useRef, useEffect } from "react";
 import { ChatMessage } from "./chat-message";
 import { FileMessage } from "./file-message";
 import { MessageInput } from "./message-input";
-import { Lock, ShieldCheck, Trash2, FileUp, Sparkles } from "lucide-react";
+import { Lock, Trash2, FileUp, Sparkles, Radio } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { ChatMessageItem } from "@/hooks/use-p2p-room";
 import { FileTransferProgress } from "@/lib/file-transfer/file-chunker";
 
@@ -44,7 +43,7 @@ export function RoomChat({
   const transferList = Object.values(activeTransfers);
 
   return (
-    <div className="flex flex-col h-[520px] rounded-2xl border border-slate-800 bg-slate-950/80 shadow-2xl backdrop-blur-xl overflow-hidden">
+    <div className="flex flex-col flex-1 h-full min-h-0 w-full rounded-2xl border border-slate-800 bg-slate-950/80 shadow-2xl backdrop-blur-xl overflow-hidden">
       {/* Chat Header */}
       <div className="flex items-center justify-between border-b border-slate-800/80 px-4 py-3 bg-slate-900/60">
         <div className="flex items-center space-x-2">
@@ -56,12 +55,18 @@ export function RoomChat({
               <span>E2E Encrypted P2P Chat</span>
             </h3>
             <span className="text-[10px] text-slate-400 block">
-              AES-GCM-256 WebCrypto • Direct RTCDataChannel
+              AES-GCM-256 WebCrypto • {isConnected ? "Live Direct RTCDataChannel" : "Local Storage Ready"}
             </span>
           </div>
         </div>
 
         <div className="flex items-center space-x-2">
+          {!isConnected && (
+            <div className="text-[10px] text-amber-400 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-md flex items-center space-x-1">
+              <Radio className="h-3 w-3 animate-pulse text-amber-400" />
+              <span>Waiting for Peer</span>
+            </div>
+          )}
           {messages.length > 0 && (
             <Button
               variant="ghost"
@@ -135,13 +140,13 @@ export function RoomChat({
         </div>
       )}
 
-      {/* Input Box */}
+      {/* Input Box - Always enabled for seamless typing */}
       <div className="p-3 border-t border-slate-800/80 bg-slate-950">
         <MessageInput
           onSendText={onSendText}
           onSendFile={onSendFile}
           onTyping={onTyping}
-          disabled={!isConnected}
+          disabled={false}
         />
       </div>
     </div>

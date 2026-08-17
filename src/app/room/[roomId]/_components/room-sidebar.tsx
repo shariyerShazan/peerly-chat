@@ -1,6 +1,6 @@
 "use client";
 
-import React from "react";
+import React, { useState, useEffect } from "react";
 import { Users, Crown, ShieldCheck, UserCheck, Share2, Radio } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -23,7 +23,16 @@ export function RoomSidebar({
   onCopyLink,
   onOpenSignaling,
 }: RoomSidebarProps) {
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
   const totalCount = connectedPeers.length + 1; // local peer + remote peers
+  const currentName = mounted && displayName ? displayName : "You";
+  const currentColor = mounted && userColor ? userColor : "from-indigo-500 to-purple-600";
+  const initialChar = currentName.charAt(0).toUpperCase();
 
   return (
     <aside className="w-full lg:w-80 border-b lg:border-b-0 lg:border-r border-slate-800/80 bg-slate-950/60 p-4 flex flex-col justify-between space-y-6 backdrop-blur-md">
@@ -45,18 +54,19 @@ export function RoomSidebar({
           <div className="rounded-xl border border-indigo-500/30 bg-indigo-500/10 p-3 flex items-center justify-between">
             <div className="flex items-center space-x-3">
               <div
-                className={`flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-tr ${userColor} text-white font-bold text-sm shadow-md`}
+                className={`flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-tr ${currentColor} text-white font-bold text-sm shadow-md`}
+                suppressHydrationWarning
               >
-                {(displayName || "Y").charAt(0).toUpperCase()}
+                {initialChar}
               </div>
               <div className="flex flex-col">
-                <span className="text-sm font-semibold text-white flex items-center space-x-1.5">
-                  <span>{displayName || "You"}</span>
+                <span className="text-sm font-semibold text-white flex items-center space-x-1.5" suppressHydrationWarning>
+                  <span>{currentName}</span>
                   <span className="text-[10px] text-indigo-300 bg-indigo-500/20 px-1.5 py-0.5 rounded font-normal">
                     You
                   </span>
                 </span>
-                <span className="text-[11px] text-slate-400">Room Creator</span>
+                <span className="text-[11px] text-slate-400">Local Peer</span>
               </div>
             </div>
             <Crown className="h-4 w-4 text-amber-400" />

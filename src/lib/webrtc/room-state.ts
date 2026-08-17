@@ -10,6 +10,7 @@ export interface PeerMember {
   connectionState: RTCPeerConnectionState;
   dataChannelState: RTCDataChannelState;
   joinedAt: number;
+  lastSeenAt?: number;
 }
 
 export type ControlMessageType =

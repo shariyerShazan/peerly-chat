@@ -15,8 +15,10 @@ export function CreateRoomCard() {
   const [roomName, setRoomName] = useState("Private P2P Space");
   const [previewId, setPreviewId] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
+  const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
+    setMounted(true);
     setDisplayName(getStoredDisplayName());
     setPreviewId(generateRoomId());
   }, []);
@@ -64,7 +66,7 @@ export function CreateRoomCard() {
               onChange={(e) => setDisplayName(e.target.value)}
               required
               maxLength={32}
-              autoFocus
+              autoComplete="off"
             />
           </div>
 
@@ -79,6 +81,7 @@ export function CreateRoomCard() {
               value={roomName}
               onChange={(e) => setRoomName(e.target.value)}
               maxLength={48}
+              autoComplete="off"
             />
           </div>
 
@@ -87,8 +90,8 @@ export function CreateRoomCard() {
               <span className="text-[11px] font-medium text-slate-400 uppercase tracking-wider block">
                 Generated Temp Room ID
               </span>
-              <code className="text-sm font-mono font-semibold text-indigo-300">
-                {previewId || "..."}
+              <code className="text-sm font-mono font-semibold text-indigo-300" suppressHydrationWarning>
+                {previewId || "room-p2p..."}
               </code>
             </div>
             <Button
@@ -106,7 +109,7 @@ export function CreateRoomCard() {
         <CardFooter>
           <Button
             type="submit"
-            disabled={!displayName.trim()}
+            disabled={mounted && !displayName.trim()}
             className="w-full h-12 text-base font-semibold group"
           >
             <span>Launch P2P Room</span>

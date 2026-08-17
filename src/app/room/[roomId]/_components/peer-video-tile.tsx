@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useRef } from "react";
-import { Mic, MicOff, VideoOff, User } from "lucide-react";
+import { Mic, MicOff, VideoOff } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 
 interface PeerVideoTileProps {
@@ -26,6 +26,7 @@ export function PeerVideoTile({
   useEffect(() => {
     if (videoRef.current && stream) {
       videoRef.current.srcObject = stream;
+      videoRef.current.play().catch(() => {});
     }
   }, [stream]);
 
@@ -54,6 +55,7 @@ export function PeerVideoTile({
         <div className="flex flex-col items-center justify-center space-y-3 p-6 text-center z-10">
           <div
             className={`flex h-20 w-20 items-center justify-center rounded-3xl bg-gradient-to-tr ${userColor} text-white font-bold text-3xl shadow-xl border border-white/10`}
+            suppressHydrationWarning
           >
             {(displayName || "U").charAt(0).toUpperCase()}
           </div>
@@ -67,7 +69,7 @@ export function PeerVideoTile({
       {/* Top Left Tag: Name & Local/Remote badge */}
       <div className="absolute top-3 left-3 flex items-center space-x-2 z-20">
         <div className="rounded-xl border border-slate-800/80 bg-slate-950/80 px-2.5 py-1 text-xs font-semibold text-white shadow-md backdrop-blur-md flex items-center space-x-1.5">
-          <span>{displayName}</span>
+          <span suppressHydrationWarning>{displayName || "User"}</span>
           {isLocal && (
             <Badge variant="outline" className="text-[10px] py-0 px-1 text-indigo-300 border-indigo-500/40">
               You

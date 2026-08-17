@@ -5,8 +5,9 @@ import { useSearchParams } from "next/navigation";
 import { RoomHeader } from "./_components/room-header";
 import { RoomSidebar } from "./_components/room-sidebar";
 import { RoomStage } from "./_components/room-stage";
+import { JoinRoomNameModal } from "./_components/join-room-name-modal";
 import { useP2PRoom } from "@/hooks/use-p2p-room";
-import { getStoredDisplayName, getStoredUserColor } from "@/lib/storage";
+import { getStoredDisplayName, setStoredDisplayName, getStoredUserColor } from "@/lib/storage";
 import { getRoomJoinUrl } from "@/lib/room-id";
 
 interface RoomPageProps {
@@ -23,8 +24,31 @@ export default function RoomPage({ params }: RoomPageProps) {
   const roomNameParam = searchParams.get("name") || "Private P2P Space";
   const [userColor, setUserColor] = useState("from-indigo-500 to-purple-600");
   const [showSignalingModal, setShowSignalingModal] = useState(false);
+  const [isHost, setIsHost] = useState(true);
+  const [mounted, setMounted] = useState(false);
+  const [isNameConfirmed, setIsNameConfirmed] = useState(false);
 
-  const initialName = getStoredDisplayName() || "User";
+  // Determine host vs guest role & initial state safely
+  useEffect(() => {
+    setMounted(true);
+    setUserColor(getStoredUserColor());
+    const storedName = getStoredDisplayName();
+    if (storedName && storedName.trim()) {
+      setIsNameConfirmed(true);
+    }
+
+    const isGuestRole =
+      searchParams.get("role") === "guest" ||
+      searchParams.get("join") === "true" ||
+      searchParams.get("host") === "false" ||
+      (typeof window !== "undefined" && window.location.hash.includes("signal="));
+
+    if (isGuestRole) {
+      setIsHost(false);
+    }
+  }, [searchParams]);
+
+  const initialName = mounted ? getStoredDisplayName() || "" : "";
 
   const {
     localPeerId,
@@ -51,22 +75,58 @@ export default function RoomPage({ params }: RoomPageProps) {
   } = useP2PRoom({
     roomId,
     initialDisplayName: initialName,
-    isHost: true,
+    isHost,
   });
 
+  const handleJoinWithName = (name: string) => {
+    setDisplayName(name);
+    setStoredDisplayName(name);
+    setIsNameConfirmed(true);
+  };
+
+  // Auto-process URL signal hash if guest opens an invite link with #signal=
   useEffect(() => {
-    setUserColor(getStoredUserColor());
-  }, []);
+    if (typeof window === "undefined") return;
+    const hash = window.location.hash;
+    if (hash.startsWith("#signal=")) {
+      try {
+        const rawSignal = decodeURIComponent(hash.replace("#signal=", ""));
+        if (rawSignal) {
+          processRemoteSignal(rawSignal);
+        }
+      } catch (err) {
+        console.warn("Failed to parse signal from URL hash:", err);
+      }
+    }
+  }, [processRemoteSignal]);
 
   const handleCopyLink = async () => {
-    const url = getRoomJoinUrl(roomId);
+    let signalToSend = activeSignal;
+    if (!signalToSend && createOfferSignal) {
+      signalToSend = await createOfferSignal();
+    }
+
+    let url = getRoomJoinUrl(roomId);
+    if (signalToSend) {
+      url += `#signal=${encodeURIComponent(signalToSend)}`;
+    } else {
+      url += `?role=guest`;
+    }
+
     try {
       await navigator.clipboard.writeText(url);
     } catch {}
   };
 
   return (
-    <div className="flex h-screen flex-col bg-slate-950 text-slate-100 overflow-hidden">
+    <div className="flex h-screen flex-col bg-slate-950 text-slate-100 overflow-hidden" suppressHydrationWarning>
+      {/* Join Room Name Modal - Prompt user to enter name before joining */}
+      <JoinRoomNameModal
+        isOpen={mounted && !isNameConfirmed}
+        initialName={displayName}
+        onJoin={handleJoinWithName}
+      />
+
       {/* Room Header */}
       <RoomHeader
         roomId={roomId}
@@ -76,7 +136,7 @@ export default function RoomPage({ params }: RoomPageProps) {
 
       {/* Main Layout */}
       <div className="flex flex-1 flex-col lg:flex-row overflow-hidden">
-        {/* Participant Sidebar */}
+        {/* Left Participant Sidebar */}
         <RoomSidebar
           displayName={displayName}
           userColor={userColor}

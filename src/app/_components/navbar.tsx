@@ -2,7 +2,7 @@
 
 import React from "react";
 import Link from "next/link";
-import { ShieldCheck, Zap, Lock } from "lucide-react";
+import { ShieldCheck, Lock, User } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 
 export function Navbar() {
@@ -17,21 +17,29 @@ export function Navbar() {
           </div>
           <div className="flex flex-col">
             <span className="text-lg font-bold tracking-tight text-white group-hover:text-indigo-300 transition-colors">
-              PureP2P<span className="text-indigo-500">.</span>
+              Peerly<span className="text-indigo-500">.</span>
             </span>
             <span className="text-[10px] font-medium tracking-wider text-slate-400 uppercase">
-              Zero Server Security
+              Pure P2P Security
             </span>
           </div>
         </Link>
 
         <div className="flex items-center space-x-3">
-          <Badge variant="success" className="hidden sm:inline-flex items-center space-x-1.5 py-1 px-3">
+          <a
+            href="#creator"
+            className="hidden sm:inline-flex items-center space-x-1.5 py-1.5 px-3 rounded-xl border border-slate-800 bg-slate-900/80 hover:bg-slate-800 hover:border-indigo-500/40 text-xs font-semibold text-slate-300 hover:text-white transition-all"
+          >
+            <User className="h-3.5 w-3.5 text-indigo-400" />
+            <span>About Creator</span>
+          </a>
+
+          <Badge variant="success" className="hidden md:inline-flex items-center space-x-1.5 py-1 px-3">
             <span className="relative flex h-2 w-2">
               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
               <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
             </span>
-            <span>Direct P2P Ready</span>
+            <span>Backendless Ready</span>
           </Badge>
 
           <Badge variant="secondary" className="inline-flex items-center space-x-1 py-1 px-3 border border-slate-700/60">

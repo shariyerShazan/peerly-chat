@@ -94,6 +94,7 @@ export function useP2PRoom({
   const connectionsRef = useRef<Map<string, ManagedPeerConnection>>(new Map());
   const assemblersRef = useRef<Map<string, IncomingFileAssembler>>(new Map());
   const typingTimersRef = useRef<Map<string, NodeJS.Timeout>>(new Map());
+  const broadcastChannelRef = useRef<BroadcastChannel | null>(null);
 
   // Initialize WebCrypto session key from roomId
   useEffect(() => {
@@ -185,9 +186,37 @@ export function useP2PRoom({
 
       const packetStr = JSON.stringify(packet);
 
+      // 1. Send via WebRTC RTCDataChannel
       connectionsRef.current.forEach((conn) => {
         conn.send(packetStr);
       });
+
+      // 2. Send via local BroadcastChannel
+      if (broadcastChannelRef.current) {
+        try {
+          broadcastChannelRef.current.postMessage({
+            type: "PEERLY_CHAT_PACKET",
+            senderPeerId: localPeerId,
+            packetStr,
+          });
+        } catch {}
+      }
+
+      // 3. Send via Next.js API Socket Signaling Endpoint
+      try {
+        const socketUrl = process.env.NEXT_PUBLIC_SOCKET_URL || "";
+        const baseUrl = socketUrl.trim() ? socketUrl.replace(/\/$/, "") : "";
+        fetch(`${baseUrl}/api/signaling`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            roomId,
+            type: "CHAT",
+            senderPeerId: localPeerId,
+            packetStr,
+          }),
+        }).catch(() => {});
+      } catch {}
 
       const localMsg: ChatMessageItem = {
         id: messageId,
@@ -254,6 +283,15 @@ export function useP2PRoom({
         },
       }));
 
+      // Auto-remove progress bar 1.5 seconds after completion
+      setTimeout(() => {
+        setActiveTransfers((prev) => {
+          const next = { ...prev };
+          delete next[transferId];
+          return next;
+        });
+      }, 1500);
+
       for (let i = 0; i < totalChunks; i++) {
         const start = i * CHUNK_SIZE;
         const end = Math.min(start + CHUNK_SIZE, file.size);
@@ -279,16 +317,45 @@ export function useP2PRoom({
         };
 
         const jsonStr = JSON.stringify(chunkEnvelope);
+
+        // 1. WebRTC DataChannel
         connectionsRef.current.forEach((conn) => {
           conn.send(jsonStr);
         });
+
+        // 2. BroadcastChannel
+        if (broadcastChannelRef.current) {
+          try {
+            broadcastChannelRef.current.postMessage({
+              type: "PEERLY_CHAT_PACKET",
+              senderPeerId: localPeerId,
+              packetStr: jsonStr,
+            });
+          } catch {}
+        }
+
+        // 3. Next.js API Signaling
+        try {
+          const socketUrl = process.env.NEXT_PUBLIC_SOCKET_URL || "";
+          const baseUrl = socketUrl.trim() ? socketUrl.replace(/\/$/, "") : "";
+          fetch(`${baseUrl}/api/signaling`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              roomId,
+              type: "CHAT",
+              senderPeerId: localPeerId,
+              packetStr: jsonStr,
+            }),
+          }).catch(() => {});
+        } catch {}
 
         if (i % 10 === 0) {
           await new Promise((res) => setTimeout(res, 5));
         }
       }
     },
-    [localPeerId, displayName]
+    [localPeerId, displayName, roomId]
   );
 
   const sendTypingSignal = useCallback(() => {
@@ -307,6 +374,12 @@ export function useP2PRoom({
       try {
         const parsed = JSON.parse(rawMsg);
         if (!parsed || !parsed.type) return;
+
+        if (parsed.senderId) {
+          setConnectedPeers((prev) =>
+            prev.map((p) => (p.peerId === parsed.senderId ? { ...p, lastSeenAt: Date.now() } : p))
+          );
+        }
 
         if (parsed.type === "CHAT_MESSAGE" && sessionKeyRef.current) {
           const decryptedText = await decryptText(
@@ -379,6 +452,14 @@ export function useP2PRoom({
           }));
 
           if (assembler.status === "completed") {
+            setTimeout(() => {
+              setActiveTransfers((prev) => {
+                const next = { ...prev };
+                delete next[chunk.transferId];
+                return next;
+              });
+            }, 1500);
+
             const blobUrl = assembler.assembleBlobUrl();
             if (blobUrl) {
               const fileMsg: ChatMessageItem = {
@@ -441,6 +522,112 @@ export function useP2PRoom({
     [roomId]
   );
 
+  // Setup local origin BroadcastChannel for instant same-browser/same-device zero-config signaling & realtime messaging
+  const processRemoteSignalRef = useRef<(rawSignal: string) => Promise<string | null>>(async () => null);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !("BroadcastChannel" in window)) return;
+    const channel = new BroadcastChannel(`peerly-room-${roomId}`);
+    broadcastChannelRef.current = channel;
+
+    channel.onmessage = (event) => {
+      const data = event.data;
+      if (!data || data.senderPeerId === localPeerId) return;
+
+      if (data.type === "PEERLY_CHAT_PACKET" && data.packetStr) {
+        handleIncomingMessage(data.packetStr);
+      }
+      if (data.type === "PEERLY_SIGNAL_PACKET" && data.signalPayload) {
+        processRemoteSignalRef.current(data.signalPayload).catch(() => {});
+      }
+    };
+
+    return () => {
+      channel.close();
+      broadcastChannelRef.current = null;
+    };
+  }, [roomId, localPeerId, handleIncomingMessage]);
+
+  // Real-Time EventSource (SSE Stream) + Socket.io Signaling & Real-time Sync
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    let isMounted = true;
+    let eventSource: EventSource | null = null;
+
+    try {
+      const socketUrl = process.env.NEXT_PUBLIC_SOCKET_URL || "";
+      const baseUrl = socketUrl.trim() ? socketUrl.replace(/\/$/, "") : "";
+      const sseUrl = `${baseUrl}/api/signaling/stream?roomId=${encodeURIComponent(roomId)}&peerId=${encodeURIComponent(localPeerId)}`;
+
+      eventSource = new EventSource(sseUrl);
+
+      eventSource.onmessage = (event) => {
+        if (!isMounted || !event.data) return;
+        try {
+          const item = JSON.parse(event.data);
+          if (item.senderPeerId !== localPeerId) {
+            if (item.type === "SIGNAL" && item.signalPayload) {
+              processRemoteSignalRef.current(item.signalPayload).catch(() => {});
+            } else if (item.type === "CHAT" && item.packetStr) {
+              handleIncomingMessage(item.packetStr);
+            }
+          }
+        } catch (err) {}
+      };
+    } catch (err) {
+      console.warn("EventSource streaming not supported or failed:", err);
+    }
+
+    let lastTimestamp = 0;
+    const syncWithApi = async () => {
+      try {
+        const socketUrl = process.env.NEXT_PUBLIC_SOCKET_URL || "";
+        const baseUrl = socketUrl.trim() ? socketUrl.replace(/\/$/, "") : "";
+        const res = await fetch(
+          `${baseUrl}/api/signaling?roomId=${encodeURIComponent(roomId)}&since=${lastTimestamp}`
+        );
+        if (!res.ok) return;
+
+        const data = await res.json();
+        if (!isMounted) return;
+
+        if (data.timestamp) {
+          lastTimestamp = data.timestamp;
+        }
+
+        if (Array.isArray(data.signals)) {
+          for (const item of data.signals) {
+            if (item.senderPeerId !== localPeerId && item.signalPayload) {
+              try {
+                await processRemoteSignalRef.current(item.signalPayload);
+              } catch (err) {}
+            }
+          }
+        }
+
+        if (Array.isArray(data.messages)) {
+          for (const item of data.messages) {
+            if (item.senderPeerId !== localPeerId && item.packetStr) {
+              handleIncomingMessage(item.packetStr);
+            }
+          }
+        }
+      } catch (err) {}
+    };
+
+    const interval = setInterval(syncWithApi, 1000);
+    syncWithApi();
+
+    return () => {
+      isMounted = false;
+      if (eventSource) {
+        eventSource.close();
+      }
+      clearInterval(interval);
+    };
+  }, [roomId, localPeerId, handleIncomingMessage]);
+
   const createOfferSignal = useCallback(
     async (localStream?: MediaStream | null) => {
       setConnectionStatus("generating");
@@ -449,19 +636,32 @@ export function useP2PRoom({
           localPeerId,
           displayName,
           {
-            onConnectionStateChange: (state) => {
-              updatePeerState(localPeerId, state);
+            onConnectionStateChange: (state, remotePeerId) => {
+              updatePeerState(remotePeerId, state);
             },
-            onDataChannelStateChange: (state) => {
-              if (state === "open") setConnectionStatus("connected");
+            onDataChannelStateChange: (state, remotePeerId) => {
+              if (state === "open") {
+                setConnectionStatus("connected");
+                addOrUpdatePeerMember(remotePeerId, "Peer", false, "connected", "open");
+              }
             },
             onMessage: (msg) => {
               handleIncomingMessage(msg);
             },
-            onTrack: (track, streams) => {
-              if (streams && streams[0]) {
-                setRemoteStreams((prev) => ({ ...prev, [localPeerId]: streams[0] }));
-              }
+            onTrack: (track, streams, remotePeerId) => {
+              setRemoteStreams((prev) => {
+                let currentStream: MediaStream;
+                if (streams && streams[0]) {
+                  currentStream = streams[0];
+                } else {
+                  currentStream = prev[remotePeerId] ? prev[remotePeerId] : new MediaStream();
+                  if (!currentStream.getTracks().some((t) => t.id === track.id)) {
+                    currentStream.addTrack(track);
+                  }
+                }
+                const updatedStream = new MediaStream(currentStream.getTracks());
+                return { ...prev, [remotePeerId]: updatedStream };
+              });
             },
           }
         );
@@ -469,7 +669,6 @@ export function useP2PRoom({
         if (localStream) peerConn.addLocalStream(localStream);
         peerConn.createDataChannel("pure-p2p-control");
         const offer = await peerConn.createOffer();
-        await new Promise((res) => setTimeout(res, 300));
 
         const encoded = encodeSignalPayload({
           type: "offer",
@@ -484,6 +683,30 @@ export function useP2PRoom({
         setActiveSignal(encoded);
         setSignalType("offer");
         setConnectionStatus("signaling");
+
+        // Broadcast offer payload instantly over POST /api/signaling and BroadcastChannel
+        try {
+          if (broadcastChannelRef.current) {
+            broadcastChannelRef.current.postMessage({
+              type: "PEERLY_SIGNAL_PACKET",
+              senderPeerId: localPeerId,
+              signalPayload: encoded,
+            });
+          }
+          const socketUrl = process.env.NEXT_PUBLIC_SOCKET_URL || "";
+          const baseUrl = socketUrl.trim() ? socketUrl.replace(/\/$/, "") : "";
+          fetch(`${baseUrl}/api/signaling`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              roomId,
+              type: "SIGNAL",
+              senderPeerId: localPeerId,
+              signalPayload: encoded,
+            }),
+          }).catch(() => {});
+        } catch (e) {}
+
         return encoded;
       } catch (err) {
         console.error("Error creating offer signal:", err);
@@ -507,22 +730,32 @@ export function useP2PRoom({
           decoded.p,
           decoded.n,
           {
-            onConnectionStateChange: (state) => {
-              updatePeerState(decoded.p, state);
+            onConnectionStateChange: (state, remotePeerId) => {
+              updatePeerState(remotePeerId, state);
             },
-            onDataChannelStateChange: (state) => {
+            onDataChannelStateChange: (state, remotePeerId) => {
               if (state === "open") {
                 setConnectionStatus("connected");
-                addOrUpdatePeerMember(decoded.p, decoded.n, false, "connected", "open");
+                addOrUpdatePeerMember(remotePeerId, decoded.n, false, "connected", "open");
               }
             },
             onMessage: (msg) => {
               handleIncomingMessage(msg);
             },
-            onTrack: (track, streams) => {
-              if (streams && streams[0]) {
-                setRemoteStreams((prev) => ({ ...prev, [decoded.p]: streams[0] }));
-              }
+            onTrack: (track, streams, remotePeerId) => {
+              setRemoteStreams((prev) => {
+                let currentStream: MediaStream;
+                if (streams && streams[0]) {
+                  currentStream = streams[0];
+                } else {
+                  currentStream = prev[remotePeerId] ? prev[remotePeerId] : new MediaStream();
+                  if (!currentStream.getTracks().some((t) => t.id === track.id)) {
+                    currentStream.addTrack(track);
+                  }
+                }
+                const updatedStream = new MediaStream(currentStream.getTracks());
+                return { ...prev, [remotePeerId]: updatedStream };
+              });
             },
           }
         );
@@ -533,7 +766,6 @@ export function useP2PRoom({
         if (decoded.c && decoded.c.length > 0) {
           await peerConn.addIceCandidates(decoded.c);
         }
-        await new Promise((res) => setTimeout(res, 300));
 
         const encodedAnswer = encodeSignalPayload({
           type: "answer",
@@ -545,29 +777,47 @@ export function useP2PRoom({
         });
 
         connectionsRef.current.set(decoded.p, peerConn);
-
-        if (isHost) {
-          setPendingRequests((prev) => [
-            ...prev.filter((r) => r.peerId !== decoded.p),
-            {
-              peerId: decoded.p,
-              displayName: decoded.n,
-              rawSignal: rawString,
-              payload: decoded,
-              timestamp: Date.now(),
-            },
-          ]);
-        }
+        addOrUpdatePeerMember(decoded.p, decoded.n, false, "connected", "open");
+        setConnectionStatus("connected");
 
         setActiveSignal(encodedAnswer);
         setSignalType("answer");
         setConnectionStatus("signaling");
+
+        // Broadcast answer payload instantly over POST /api/signaling and BroadcastChannel
+        try {
+          if (broadcastChannelRef.current) {
+            broadcastChannelRef.current.postMessage({
+              type: "PEERLY_SIGNAL_PACKET",
+              senderPeerId: localPeerId,
+              signalPayload: encodedAnswer,
+            });
+          }
+          const socketUrl = process.env.NEXT_PUBLIC_SOCKET_URL || "";
+          const baseUrl = socketUrl.trim() ? socketUrl.replace(/\/$/, "") : "";
+          fetch(`${baseUrl}/api/signaling`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              roomId,
+              type: "SIGNAL",
+              senderPeerId: localPeerId,
+              signalPayload: encodedAnswer,
+            }),
+          }).catch(() => {});
+        } catch (e) {}
+
         return encodedAnswer;
       }
 
       if (decoded.t === "answer") {
         const peerConn = connectionsRef.current.get(localPeerId) || connectionsRef.current.get(decoded.p);
         if (!peerConn) throw new Error("No pending offer connection found for this answer signal");
+
+        // Re-key connection from temporary localPeerId key to Guest's real decoded.p ID!
+        connectionsRef.current.delete(localPeerId);
+        peerConn.updateRemotePeerInfo(decoded.p, decoded.n);
+        connectionsRef.current.set(decoded.p, peerConn);
 
         await peerConn.setAnswer(decoded.s);
         if (decoded.c && decoded.c.length > 0) {
@@ -584,11 +834,14 @@ export function useP2PRoom({
     [localPeerId, displayName, roomId, isHost, handleIncomingMessage]
   );
 
+  processRemoteSignalRef.current = processRemoteSignal;
+
   const acceptJoinRequest = useCallback(
     async (request: PendingJoinRequest, answerSignalOverride?: string, localStream?: MediaStream | null) => {
       try {
-        if (answerSignalOverride) {
-          await processRemoteSignal(answerSignalOverride, localStream);
+        const signalToProcess = answerSignalOverride || request.rawSignal;
+        if (signalToProcess) {
+          await processRemoteSignal(signalToProcess, localStream);
         }
         setPendingRequests((prev) => prev.filter((r) => r.peerId !== request.peerId));
       } catch (err) {
@@ -628,12 +881,13 @@ export function useP2PRoom({
     connState: RTCPeerConnectionState,
     dcState: RTCDataChannelState
   ) => {
+    const now = Date.now();
     setConnectedPeers((prev) => {
       const exists = prev.find((p) => p.peerId === peerId);
       if (exists) {
         return prev.map((p) =>
           p.peerId === peerId
-            ? { ...p, connectionState: connState, dataChannelState: dcState }
+            ? { ...p, connectionState: connState, dataChannelState: dcState, lastSeenAt: now }
             : p
         );
       }
@@ -645,11 +899,50 @@ export function useP2PRoom({
           isHost: hostFlag,
           connectionState: connState,
           dataChannelState: dcState,
-          joinedAt: Date.now(),
+          joinedAt: now,
+          lastSeenAt: now,
         },
       ];
     });
   };
+
+  // 2-Minute Offline Auto-Removal & Stream Cleanup Timer
+  useEffect(() => {
+    const OFFLINE_TIMEOUT_MS = 2 * 60 * 1000; // 2 minutes (120,000 ms)
+
+    const cleanupInterval = setInterval(() => {
+      const now = Date.now();
+      setConnectedPeers((prev) => {
+        const active = prev.filter((peer) => {
+          const lastSeen = peer.lastSeenAt || peer.joinedAt || now;
+          const isExpired = now - lastSeen > OFFLINE_TIMEOUT_MS;
+          const isDisconnected =
+            peer.connectionState === "disconnected" || peer.connectionState === "failed";
+
+          if (isExpired || (isDisconnected && now - lastSeen > 15000)) {
+            // Close WebRTC peer connection and cleanup stream
+            const conn = connectionsRef.current.get(peer.peerId);
+            if (conn) {
+              try {
+                conn.pc.close();
+              } catch (e) {}
+              connectionsRef.current.delete(peer.peerId);
+            }
+            setRemoteStreams((streams) => {
+              const next = { ...streams };
+              delete next[peer.peerId];
+              return next;
+            });
+            return false;
+          }
+          return true;
+        });
+        return active;
+      });
+    }, 5000);
+
+    return () => clearInterval(cleanupInterval);
+  }, []);
 
   return {
     localPeerId,

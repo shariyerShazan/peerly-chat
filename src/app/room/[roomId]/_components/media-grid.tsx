@@ -25,15 +25,18 @@ export function MediaGrid({
 }: MediaGridProps) {
   const totalCount = 1 + connectedPeers.length;
 
-  let gridColsClass = "grid-cols-1";
+  // Messenger twin / multi grid layout styling
+  let gridLayoutClass = "grid-cols-1 max-w-3xl mx-auto";
   if (totalCount === 2) {
-    gridColsClass = "grid-cols-1 md:grid-cols-2";
-  } else if (totalCount >= 3) {
-    gridColsClass = "grid-cols-1 md:grid-cols-2 lg:grid-cols-3";
+    gridLayoutClass = "grid-cols-1 md:grid-cols-2 max-w-5xl mx-auto";
+  } else if (totalCount >= 3 && totalCount <= 4) {
+    gridLayoutClass = "grid-cols-1 sm:grid-cols-2 max-w-6xl mx-auto";
+  } else if (totalCount >= 5) {
+    gridLayoutClass = "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3";
   }
 
   return (
-    <div className={`grid gap-4 w-full h-[520px] p-2 overflow-y-auto ${gridColsClass}`}>
+    <div className={`grid gap-4 w-full flex-1 min-h-[480px] p-2 overflow-y-auto ${gridLayoutClass}`}>
       {/* Local Video Tile */}
       <PeerVideoTile
         displayName={localDisplayName}
@@ -47,6 +50,11 @@ export function MediaGrid({
       {/* Remote Video Tiles */}
       {connectedPeers.map((peer) => {
         const stream = remoteStreams[peer.peerId] || null;
+        const hasVideo =
+          !!stream &&
+          stream.getVideoTracks().length > 0 &&
+          stream.getVideoTracks().some((t) => t.enabled);
+
         return (
           <PeerVideoTile
             key={peer.peerId}
@@ -54,7 +62,7 @@ export function MediaGrid({
             stream={stream}
             isLocal={false}
             isMicMuted={false}
-            isVideoMuted={!stream}
+            isVideoMuted={!hasVideo}
             userColor="from-purple-600 to-indigo-600"
           />
         );

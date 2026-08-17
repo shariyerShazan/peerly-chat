@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "PureP2P — Secure Backendless Chat, Audio & Video",
+  title: "Peerly — Secure Backendless P2P Chat, Audio & Video",
   description:
     "100% Client-Side Pure Peer-to-Peer Encrypted Communication Web Application. No registration, no login, no backend server, no database.",
   keywords: [
@@ -25,6 +25,7 @@ export const metadata: Metadata = {
     "Zero Server",
     "Backendless Chat",
     "Video Call",
+    "Peerly",
   ],
 };
 
@@ -37,8 +38,12 @@ export default function RootLayout({
     <html
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable} dark h-full antialiased`}
+      suppressHydrationWarning
     >
-      <body className="min-h-full flex flex-col bg-slate-950 text-slate-100 selection:bg-indigo-500 selection:text-white">
+      <body
+        className="min-h-full flex flex-col bg-slate-950 text-slate-100 selection:bg-indigo-500 selection:text-white"
+        suppressHydrationWarning
+      >
         {children}
       </body>
     </html>
