@@ -13,9 +13,8 @@ export function ChatMessage({ message }: ChatMessageProps) {
 
   return (
     <div
-      className={`flex flex-col space-y-1 my-2 max-w-[85%] sm:max-w-[70%] ${
-        isSelf ? "ml-auto items-end" : "mr-auto items-start"
-      }`}
+      className={`flex flex-col space-y-1 my-2 max-w-[85%] sm:max-w-[70%] ${isSelf ? "ml-auto items-end" : "mr-auto items-start"
+        }`}
     >
       {/* Sender Header */}
       <div className="flex items-center space-x-1.5 text-[11px] text-slate-400 px-1">
@@ -33,11 +32,10 @@ export function ChatMessage({ message }: ChatMessageProps) {
 
       {/* Message Bubble */}
       <div
-        className={`rounded-2xl px-4 py-2.5 text-sm leading-relaxed shadow-md backdrop-blur-md ${
-          isSelf
+        className={`rounded-2xl px-4 py-2.5 text-sm leading-relaxed shadow-md backdrop-blur-md ${isSelf
             ? "bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-br-none"
             : "bg-slate-900 border border-slate-800 text-slate-100 rounded-bl-none"
-        }`}
+          }`}
       >
         <p className="whitespace-pre-wrap break-words">{message.text}</p>
       </div>

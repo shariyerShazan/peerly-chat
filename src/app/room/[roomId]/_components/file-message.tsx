@@ -18,9 +18,8 @@ export function FileMessage({ message }: FileMessageProps) {
 
   return (
     <div
-      className={`flex flex-col space-y-1 my-2 max-w-[85%] sm:max-w-[70%] ${
-        isSelf ? "ml-auto items-end" : "mr-auto items-start"
-      }`}
+      className={`flex flex-col space-y-1 my-2 max-w-[85%] sm:max-w-[70%] ${isSelf ? "ml-auto items-end" : "mr-auto items-start"
+        }`}
     >
       {/* Header */}
       <div className="flex items-center space-x-1.5 text-[11px] text-slate-400 px-1">
@@ -61,11 +60,10 @@ export function FileMessage({ message }: FileMessageProps) {
       ) : (
         /* Regular Document / Non-Image File Card */
         <div
-          className={`rounded-2xl p-3 shadow-xl border backdrop-blur-md space-y-2 w-full ${
-            isSelf
+          className={`rounded-2xl p-3 shadow-xl border backdrop-blur-md space-y-2 w-full ${isSelf
               ? "bg-indigo-950/80 border-indigo-500/30 text-white rounded-br-none"
               : "bg-slate-900/90 border-slate-800 text-slate-100 rounded-bl-none"
-          }`}
+            }`}
         >
           <div className="flex items-center justify-between gap-3">
             <div className="flex items-center space-x-3 overflow-hidden">
