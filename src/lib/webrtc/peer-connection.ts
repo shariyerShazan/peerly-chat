@@ -1,6 +1,6 @@
 /**
- * WebRTC Peer Connection & DataChannel Lifecycle Wrapper
- * Manages RTCPeerConnection, ICE gathering, DataChannel creation, state events, and teardown.
+ * WebRTC Peer Connection & DataChannel & MediaTrack Lifecycle Wrapper
+ * Manages RTCPeerConnection, ICE gathering, DataChannel, MediaStreams, state events, and teardown.
  */
 
 export interface PeerConnectionCallbacks {
@@ -9,6 +9,7 @@ export interface PeerConnectionCallbacks {
   onConnectionStateChange?: (state: RTCPeerConnectionState) => void;
   onDataChannelStateChange?: (state: RTCDataChannelState) => void;
   onMessage?: (data: string) => void;
+  onTrack?: (track: MediaStreamTrack, streams: readonly MediaStream[]) => void;
   onError?: (err: Error) => void;
 }
 
@@ -68,6 +69,23 @@ export class ManagedPeerConnection {
     this.pc.ondatachannel = (event) => {
       this.bindDataChannel(event.channel);
     };
+
+    this.pc.ontrack = (event) => {
+      this.callbacks.onTrack?.(event.track, event.streams);
+    };
+  }
+
+  /**
+   * Attaches local audio/video MediaStream tracks to peer connection
+   */
+  public addLocalStream(stream: MediaStream): void {
+    stream.getTracks().forEach((track) => {
+      try {
+        this.pc.addTrack(track, stream);
+      } catch (err) {
+        console.warn(`Failed to add track ${track.kind} to peer ${this.peerId}:`, err);
+      }
+    });
   }
 
   /**
@@ -101,18 +119,12 @@ export class ManagedPeerConnection {
     };
   }
 
-  /**
-   * Generates SDP Offer
-   */
   public async createOffer(): Promise<RTCSessionDescriptionInit> {
     const offer = await this.pc.createOffer();
     await this.pc.setLocalDescription(offer);
     return offer;
   }
 
-  /**
-   * Generates SDP Answer in response to offer
-   */
   public async createAnswer(offerSdp: string): Promise<RTCSessionDescriptionInit> {
     await this.pc.setRemoteDescription(
       new RTCSessionDescription({ type: "offer", sdp: offerSdp })
@@ -122,9 +134,6 @@ export class ManagedPeerConnection {
     return answer;
   }
 
-  /**
-   * Applies SDP Answer on the host side
-   */
   public async setAnswer(answerSdp: string): Promise<void> {
     if (this.pc.signalingState === "stable") return;
     await this.pc.setRemoteDescription(
@@ -132,9 +141,6 @@ export class ManagedPeerConnection {
     );
   }
 
-  /**
-   * Applies remote ICE candidates
-   */
   public async addIceCandidates(candidates: RTCIceCandidateInit[]): Promise<void> {
     for (const cand of candidates) {
       try {
@@ -145,9 +151,6 @@ export class ManagedPeerConnection {
     }
   }
 
-  /**
-   * Sends text/data string over DataChannel
-   */
   public send(data: string): boolean {
     if (this.dataChannel && this.dataChannel.readyState === "open") {
       this.dataChannel.send(data);
@@ -156,9 +159,6 @@ export class ManagedPeerConnection {
     return false;
   }
 
-  /**
-   * Graceful cleanup
-   */
   public close(): void {
     if (this.isClosed) return;
     this.isClosed = true;

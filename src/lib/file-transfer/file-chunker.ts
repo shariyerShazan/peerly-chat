@@ -92,3 +92,11 @@ export function formatFileSize(bytes: number): string {
   const i = Math.floor(Math.log(bytes) / Math.log(k));
   return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`;
 }
+
+export function revokeBlobUrl(url: string | undefined): void {
+  if (url && typeof window !== "undefined" && url.startsWith("blob:")) {
+    try {
+      URL.revokeObjectURL(url);
+    } catch {}
+  }
+}

@@ -29,7 +29,6 @@ import {
   saveLocalMessage,
   getLocalRoomMessages,
   clearLocalRoomHistory,
-  StoredChatMessage,
 } from "@/lib/storage/indexed-db";
 
 export interface PendingJoinRequest {
@@ -77,19 +76,20 @@ export function useP2PRoom({
 
   const [displayName, setDisplayNameState] = useState(initialDisplayName || "User");
   const [connectedPeers, setConnectedPeers] = useState<PeerMember[]>([]);
-  const [pendingRequests, setPendingRequests] = useState<any[]>([]);
+  const [pendingRequests, setPendingRequests] = useState<PendingJoinRequest[]>([]);
   const [activeSignal, setActiveSignal] = useState<string | null>(null);
   const [signalType, setSignalType] = useState<"offer" | "answer" | null>(null);
   const [connectionStatus, setConnectionStatus] = useState<
     "idle" | "generating" | "signaling" | "connected" | "error"
   >("idle");
 
-  // Crypto & Chat States
+  // Crypto & Chat & Media States
   const sessionKeyRef = useRef<CryptoKey | null>(null);
   const [isKeyReady, setIsKeyReady] = useState(false);
   const [messages, setMessages] = useState<ChatMessageItem[]>([]);
   const [typingPeers, setTypingPeers] = useState<{ [peerId: string]: string }>({});
   const [activeTransfers, setActiveTransfers] = useState<{ [transferId: string]: FileTransferProgress }>({});
+  const [remoteStreams, setRemoteStreams] = useState<{ [peerId: string]: MediaStream }>({});
 
   const connectionsRef = useRef<Map<string, ManagedPeerConnection>>(new Map());
   const assemblersRef = useRef<Map<string, IncomingFileAssembler>>(new Map());
@@ -107,7 +107,6 @@ export function useP2PRoom({
       })
       .catch((err) => console.error("Crypto key derivation failed:", err));
 
-    // Load local history from IndexedDB
     getLocalRoomMessages(roomId).then((storedMsgs) => {
       if (isMounted && storedMsgs.length > 0) {
         setMessages(
@@ -155,6 +154,7 @@ export function useP2PRoom({
     setConnectedPeers([]);
     setPendingRequests([]);
     setActiveSignal(null);
+    setRemoteStreams({});
     setConnectionStatus("idle");
   }, [localPeerId, displayName, roomId]);
 
@@ -164,9 +164,6 @@ export function useP2PRoom({
     };
   }, [leaveRoom]);
 
-  /**
-   * Sends E2E Encrypted Text Message over RTCDataChannel
-   */
   const sendTextMessage = useCallback(
     async (text: string) => {
       if (!text.trim() || !sessionKeyRef.current) return;
@@ -174,7 +171,6 @@ export function useP2PRoom({
       const messageId = `msg-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
       const timestamp = Date.now();
 
-      // Encrypt text using WebCrypto AES-GCM
       const encrypted = await encryptText(text.trim(), sessionKeyRef.current);
 
       const packet = {
@@ -189,12 +185,10 @@ export function useP2PRoom({
 
       const packetStr = JSON.stringify(packet);
 
-      // Broadcast to connected peers
       connectionsRef.current.forEach((conn) => {
         conn.send(packetStr);
       });
 
-      // Append local message state
       const localMsg: ChatMessageItem = {
         id: messageId,
         senderId: localPeerId,
@@ -207,7 +201,6 @@ export function useP2PRoom({
 
       setMessages((prev) => [...prev, localMsg]);
 
-      // Save locally to IndexedDB
       saveLocalMessage({
         id: messageId,
         roomId,
@@ -221,9 +214,6 @@ export function useP2PRoom({
     [localPeerId, displayName, roomId]
   );
 
-  /**
-   * Transmits file using chunking and WebCrypto buffer encryption
-   */
   const sendFile = useCallback(
     async (file: File) => {
       if (!file || !sessionKeyRef.current) return;
@@ -231,7 +221,6 @@ export function useP2PRoom({
       const transferId = `file-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
       const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
 
-      // Add local file message to chat state
       const fileMsg: ChatMessageItem = {
         id: transferId,
         senderId: localPeerId,
@@ -265,14 +254,12 @@ export function useP2PRoom({
         },
       }));
 
-      // Read & Chunk file
       for (let i = 0; i < totalChunks; i++) {
         const start = i * CHUNK_SIZE;
         const end = Math.min(start + CHUNK_SIZE, file.size);
         const slice = file.slice(start, end);
         const arrayBuffer = await slice.arrayBuffer();
 
-        // Encrypt chunk ArrayBuffer
         const { ciphertextBase64, ivBase64 } = await encryptBuffer(
           arrayBuffer,
           sessionKeyRef.current
@@ -296,7 +283,6 @@ export function useP2PRoom({
           conn.send(jsonStr);
         });
 
-        // Slight yield to avoid blocking UI thread on large files
         if (i % 10 === 0) {
           await new Promise((res) => setTimeout(res, 5));
         }
@@ -305,9 +291,6 @@ export function useP2PRoom({
     [localPeerId, displayName]
   );
 
-  /**
-   * Signal typing event to connected peers
-   */
   const sendTypingSignal = useCallback(() => {
     const packet = JSON.stringify({
       type: "TYPING",
@@ -319,16 +302,12 @@ export function useP2PRoom({
     });
   }, [localPeerId, displayName]);
 
-  /**
-   * Handles incoming DataChannel packets (Messages, Files, Control)
-   */
   const handleIncomingMessage = useCallback(
     async (rawMsg: string) => {
       try {
         const parsed = JSON.parse(rawMsg);
         if (!parsed || !parsed.type) return;
 
-        // E2E Encrypted Chat Message
         if (parsed.type === "CHAT_MESSAGE" && sessionKeyRef.current) {
           const decryptedText = await decryptText(
             { ciphertext: parsed.ciphertext, iv: parsed.iv },
@@ -362,7 +341,6 @@ export function useP2PRoom({
           return;
         }
 
-        // Encrypted File Chunk
         if (parsed.type === "FILE_CHUNK" && sessionKeyRef.current) {
           const chunk: FileChunkEnvelope = parsed;
 
@@ -378,7 +356,6 @@ export function useP2PRoom({
             assemblersRef.current.set(chunk.transferId, assembler);
           }
 
-          // Decrypt chunk buffer
           const decryptedChunkBuffer = await decryptBuffer(
             chunk.chunkDataBase64,
             chunk.ivBase64,
@@ -427,7 +404,6 @@ export function useP2PRoom({
           return;
         }
 
-        // Typing Indicator
         if (parsed.type === "TYPING") {
           const peerId = parsed.senderId;
           const peerName = parsed.senderName;
@@ -450,9 +426,13 @@ export function useP2PRoom({
           return;
         }
 
-        // P2P Control Messages
         if (parsed.type === "PEER_LEAVE") {
           setConnectedPeers((prev) => prev.filter((p) => p.peerId !== parsed.senderId));
+          setRemoteStreams((prev) => {
+            const next = { ...prev };
+            delete next[parsed.senderId];
+            return next;
+          });
         }
       } catch (err) {
         console.warn("Failed to parse incoming DataChannel message:", err);
@@ -461,52 +441,61 @@ export function useP2PRoom({
     [roomId]
   );
 
-  const createOfferSignal = useCallback(async () => {
-    setConnectionStatus("generating");
-    try {
-      const peerConn = new ManagedPeerConnection(
-        localPeerId,
-        displayName,
-        {
-          onConnectionStateChange: (state) => {
-            updatePeerState(localPeerId, state);
-          },
-          onDataChannelStateChange: (state) => {
-            if (state === "open") setConnectionStatus("connected");
-          },
-          onMessage: (msg) => {
-            handleIncomingMessage(msg);
-          },
-        }
-      );
+  const createOfferSignal = useCallback(
+    async (localStream?: MediaStream | null) => {
+      setConnectionStatus("generating");
+      try {
+        const peerConn = new ManagedPeerConnection(
+          localPeerId,
+          displayName,
+          {
+            onConnectionStateChange: (state) => {
+              updatePeerState(localPeerId, state);
+            },
+            onDataChannelStateChange: (state) => {
+              if (state === "open") setConnectionStatus("connected");
+            },
+            onMessage: (msg) => {
+              handleIncomingMessage(msg);
+            },
+            onTrack: (track, streams) => {
+              if (streams && streams[0]) {
+                setRemoteStreams((prev) => ({ ...prev, [localPeerId]: streams[0] }));
+              }
+            },
+          }
+        );
 
-      peerConn.createDataChannel("pure-p2p-control");
-      const offer = await peerConn.createOffer();
-      await new Promise((res) => setTimeout(res, 300));
+        if (localStream) peerConn.addLocalStream(localStream);
+        peerConn.createDataChannel("pure-p2p-control");
+        const offer = await peerConn.createOffer();
+        await new Promise((res) => setTimeout(res, 300));
 
-      const encoded = encodeSignalPayload({
-        type: "offer",
-        roomId,
-        peerId: localPeerId,
-        displayName,
-        sdp: offer.sdp || "",
-        candidates: peerConn.bufferedCandidates,
-      });
+        const encoded = encodeSignalPayload({
+          type: "offer",
+          roomId,
+          peerId: localPeerId,
+          displayName,
+          sdp: offer.sdp || "",
+          candidates: peerConn.bufferedCandidates,
+        });
 
-      connectionsRef.current.set(localPeerId, peerConn);
-      setActiveSignal(encoded);
-      setSignalType("offer");
-      setConnectionStatus("signaling");
-      return encoded;
-    } catch (err) {
-      console.error("Error creating offer signal:", err);
-      setConnectionStatus("error");
-      return null;
-    }
-  }, [localPeerId, displayName, roomId, handleIncomingMessage]);
+        connectionsRef.current.set(localPeerId, peerConn);
+        setActiveSignal(encoded);
+        setSignalType("offer");
+        setConnectionStatus("signaling");
+        return encoded;
+      } catch (err) {
+        console.error("Error creating offer signal:", err);
+        setConnectionStatus("error");
+        return null;
+      }
+    },
+    [localPeerId, displayName, roomId, handleIncomingMessage]
+  );
 
   const processRemoteSignal = useCallback(
-    async (rawString: string) => {
+    async (rawString: string, localStream?: MediaStream | null) => {
       const decoded = decodeSignalPayload(rawString);
       if (!decoded) throw new Error("Invalid signaling payload format");
       if (decoded.r !== roomId) throw new Error("Signal payload belongs to a different room ID");
@@ -530,8 +519,15 @@ export function useP2PRoom({
             onMessage: (msg) => {
               handleIncomingMessage(msg);
             },
+            onTrack: (track, streams) => {
+              if (streams && streams[0]) {
+                setRemoteStreams((prev) => ({ ...prev, [decoded.p]: streams[0] }));
+              }
+            },
           }
         );
+
+        if (localStream) peerConn.addLocalStream(localStream);
 
         const answer = await peerConn.createAnswer(decoded.s);
         if (decoded.c && decoded.c.length > 0) {
@@ -589,10 +585,10 @@ export function useP2PRoom({
   );
 
   const acceptJoinRequest = useCallback(
-    async (request: any, answerSignalOverride?: string) => {
+    async (request: PendingJoinRequest, answerSignalOverride?: string, localStream?: MediaStream | null) => {
       try {
         if (answerSignalOverride) {
-          await processRemoteSignal(answerSignalOverride);
+          await processRemoteSignal(answerSignalOverride, localStream);
         }
         setPendingRequests((prev) => prev.filter((r) => r.peerId !== request.peerId));
       } catch (err) {
@@ -668,6 +664,7 @@ export function useP2PRoom({
     messages,
     typingPeers,
     activeTransfers,
+    remoteStreams,
     createOfferSignal,
     processRemoteSignal,
     acceptJoinRequest,
