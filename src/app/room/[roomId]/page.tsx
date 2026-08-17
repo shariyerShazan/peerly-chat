@@ -63,6 +63,7 @@ export default function RoomPage({ params }: RoomPageProps) {
     typingPeers,
     activeTransfers,
     remoteStreams,
+    updateLocalStream,
     createOfferSignal,
     processRemoteSignal,
     acceptJoinRequest,
@@ -159,13 +160,14 @@ export default function RoomPage({ params }: RoomPageProps) {
           typingPeers={typingPeers}
           activeTransfers={activeTransfers}
           remoteStreams={remoteStreams}
+          onUpdateLocalStream={updateLocalStream}
           onCreateOfferSignal={createOfferSignal}
           onProcessSignalPayload={processRemoteSignal}
           onAcceptJoinRequest={acceptJoinRequest}
           onRejectJoinRequest={rejectJoinRequest}
           onSendTextMessage={sendTextMessage}
           onSendFile={sendFile}
-          onSendTyping={sendTypingSignal}
+          onSendTyping={(isTyping) => sendTypingSignal(!!isTyping)}
           onClearHistory={clearHistory}
           onLeaveRoom={leaveRoom}
         />

@@ -50,10 +50,9 @@ export function MediaGrid({
       {/* Remote Video Tiles */}
       {connectedPeers.map((peer) => {
         const stream = remoteStreams[peer.peerId] || null;
-        const hasVideo =
-          !!stream &&
-          stream.getVideoTracks().length > 0 &&
-          stream.getVideoTracks().some((t) => t.enabled);
+        const hasVideoTrack = !!stream && stream.getVideoTracks().length > 0;
+        const isRemoteVideoMuted = peer.isVideoMuted ?? !hasVideoTrack;
+        const isRemoteMicMuted = peer.isMicMuted ?? false;
 
         return (
           <PeerVideoTile
@@ -61,8 +60,8 @@ export function MediaGrid({
             displayName={peer.displayName}
             stream={stream}
             isLocal={false}
-            isMicMuted={false}
-            isVideoMuted={!hasVideo}
+            isMicMuted={isRemoteMicMuted}
+            isVideoMuted={isRemoteVideoMuted}
             userColor="from-purple-600 to-indigo-600"
           />
         );

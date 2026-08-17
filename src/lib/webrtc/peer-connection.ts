@@ -168,7 +168,6 @@ export class ManagedPeerConnection {
   public async createOffer(): Promise<RTCSessionDescriptionInit> {
     const offer = await this.pc.createOffer();
     await this.pc.setLocalDescription(offer);
-    await this.waitForIceGathering(1000);
     return this.pc.localDescription || offer;
   }
 
@@ -176,9 +175,9 @@ export class ManagedPeerConnection {
     await this.pc.setRemoteDescription(
       new RTCSessionDescription({ type: "offer", sdp: offerSdp })
     );
+    await this.flushPendingIceCandidates();
     const answer = await this.pc.createAnswer();
     await this.pc.setLocalDescription(answer);
-    await this.waitForIceGathering(1000);
     return this.pc.localDescription || answer;
   }
 
@@ -187,15 +186,37 @@ export class ManagedPeerConnection {
     await this.pc.setRemoteDescription(
       new RTCSessionDescription({ type: "answer", sdp: answerSdp })
     );
+    await this.flushPendingIceCandidates();
+  }
+
+  public pendingIceCandidates: RTCIceCandidateInit[] = [];
+
+  public async addIceCandidate(candidate: RTCIceCandidateInit): Promise<void> {
+    if (!this.pc.remoteDescription || !this.pc.remoteDescription.type) {
+      this.pendingIceCandidates.push(candidate);
+      return;
+    }
+    try {
+      await this.pc.addIceCandidate(new RTCIceCandidate(candidate));
+    } catch (err) {
+      console.warn(`Failed to add ICE candidate for peer ${this.peerId}:`, err);
+    }
+  }
+
+  public async flushPendingIceCandidates(): Promise<void> {
+    while (this.pendingIceCandidates.length > 0) {
+      const cand = this.pendingIceCandidates.shift();
+      if (cand) {
+        try {
+          await this.pc.addIceCandidate(new RTCIceCandidate(cand));
+        } catch (err) {}
+      }
+    }
   }
 
   public async addIceCandidates(candidates: RTCIceCandidateInit[]): Promise<void> {
     for (const cand of candidates) {
-      try {
-        await this.pc.addIceCandidate(new RTCIceCandidate(cand));
-      } catch (err) {
-        console.warn(`Failed to add ICE candidate for peer ${this.peerId}:`, err);
-      }
+      await this.addIceCandidate(cand);
     }
   }
 

@@ -31,8 +31,9 @@ export function RoomSidebar({
 
   const totalCount = connectedPeers.length + 1; // local peer + remote peers
   const currentName = mounted && displayName ? displayName : "You";
+  const displayLabel = !displayName || currentName === "User" ? "You" : currentName;
   const currentColor = mounted && userColor ? userColor : "from-indigo-500 to-purple-600";
-  const initialChar = currentName.charAt(0).toUpperCase();
+  const initialChar = displayLabel.charAt(0).toUpperCase();
 
   return (
     <aside className="w-full lg:w-80 border-b lg:border-b-0 lg:border-r border-slate-800/80 bg-slate-950/60 p-4 flex flex-col justify-between space-y-6 backdrop-blur-md">
@@ -61,10 +62,12 @@ export function RoomSidebar({
               </div>
               <div className="flex flex-col">
                 <span className="text-sm font-semibold text-white flex items-center space-x-1.5" suppressHydrationWarning>
-                  <span>{currentName}</span>
-                  <span className="text-[10px] text-indigo-300 bg-indigo-500/20 px-1.5 py-0.5 rounded font-normal">
-                    You
-                  </span>
+                  <span>{displayLabel}</span>
+                  {displayLabel !== "You" && (
+                    <span className="text-[10px] text-indigo-300 bg-indigo-500/20 px-1.5 py-0.5 rounded font-normal">
+                      You
+                    </span>
+                  )}
                 </span>
                 <span className="text-[11px] text-slate-400">Local Peer</span>
               </div>

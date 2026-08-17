@@ -37,13 +37,14 @@ interface RoomStageProps {
   typingPeers: { [peerId: string]: string };
   activeTransfers: { [transferId: string]: FileTransferProgress };
   remoteStreams: { [peerId: string]: MediaStream };
+  onUpdateLocalStream?: (stream: MediaStream | null) => void;
   onCreateOfferSignal: (stream?: MediaStream | null) => void;
   onProcessSignalPayload: (payload: string, stream?: MediaStream | null) => Promise<any>;
   onAcceptJoinRequest: (req: PendingJoinRequest) => void;
   onRejectJoinRequest: (peerId: string) => void;
   onSendTextMessage: (text: string) => void;
   onSendFile: (file: File) => void;
-  onSendTyping: () => void;
+  onSendTyping?: (isTyping?: boolean) => void;
   onClearHistory: () => void;
   onLeaveRoom: () => void;
 }
@@ -60,6 +61,7 @@ export function RoomStage({
   typingPeers,
   activeTransfers,
   remoteStreams,
+  onUpdateLocalStream,
   onCreateOfferSignal,
   onProcessSignalPayload,
   onAcceptJoinRequest,
@@ -87,6 +89,11 @@ export function RoomStage({
   } = useMediaStream();
 
   const isConnected = connectionStatus === "connected" || connectedPeers.length > 0;
+
+  // Sync localStream to WebRTC Connection Manager
+  useEffect(() => {
+    onUpdateLocalStream?.(localStream);
+  }, [localStream, onUpdateLocalStream]);
 
   // Global Keyboard Shortcuts (M, V, Space push-to-talk)
   useEffect(() => {
@@ -244,7 +251,7 @@ export function RoomStage({
             isConnected={isConnected}
             onSendText={onSendTextMessage}
             onSendFile={onSendFile}
-            onTyping={onSendTyping}
+            onTyping={() => onSendTyping?.(true)}
             onClearHistory={onClearHistory}
           />
         )}
